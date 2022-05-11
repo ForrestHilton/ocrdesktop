@@ -13,9 +13,10 @@ __appname__   = "OCRdesktop"
 __comments__  = "A accessibility tool for woring with inaccessible windows and dialogs"
 
 #Python Utils
-import os, sys, getopt, locale, time, re, _thread, shutil, tempfile
+import os, sys, getopt, locale, time, re, _thread, shutil, tempfile, subprocess
 from collections import defaultdict
 from mimetypes import MimeTypes
+import pynput
 
 #PIL
 from PIL import Image
@@ -207,6 +208,32 @@ class OCRScreenReader(Gtk.Window):
                 print("Could not take screenshot") 
             return False
 
+    def _screenShotArea(self):
+        clicked_points = []
+        listener = pynput.mouse.Listener(on_click= lambda x, y,button, pressed : clicked_points.append((x,y)) )
+        listener.start()
+
+        path="/tmp/ocrScreenshot.png"
+        before = time.time()
+        sp = subprocess.call(["gnome-screenshot","-a","-f",path])
+        listener.stop()
+        if sp == 127:
+            print("gnome-screenshot is required for mouse based selection")
+            return False
+        if sp != 0:
+            print("gnome-screenshot failed")
+            return False
+        if not os.path.exists(path) or os.path.getmtime(path) < before:
+            if self._debug: # Debug code
+                print("the user canceled the screenshot by pressing escape")
+            return False
+        if self._debug: # Debug code
+            print("save screenshot:/tmp/ocrScreenshot.png")
+        self._img=[Image.open(path)]
+        self._offsetXpos, self._offsetYpos = min(clicked_points[0][0],clicked_points[1][0]), min(clicked_points[0][1],clicked_points[1][1])
+        print(self._offsetXpos)
+        return True
+
     def pixbuf2image(self, pix):
         """Convert gdkpixbuf to PIL image"""
         data = pix.get_pixels()
@@ -255,7 +282,10 @@ class OCRScreenReader(Gtk.Window):
             Ok = self._readClipboard()
         elif self._screenShotMode == 3:
             Ok = self._readFile()
+        elif self._screenShotMode == 4:
+            Ok = self._screenShotArea()
         return Ok
+
     def _readFile(self):
         if self._file == '':
             return False
@@ -455,7 +485,7 @@ class OCRScreenReader(Gtk.Window):
         #    tesseractData = "/usr/share/tessdata/"
         #else:
         #    tesseractData = "/usr/share/"
-        
+        # print(OCRWords)
         return True
 
     def add_accelerator(self, widget, accelerator, signal="activate"):
@@ -739,7 +769,7 @@ class OCRScreenReader(Gtk.Window):
         self.item_ocrdesktop.set_use_underline(True)
         self.item_ocrdesktop.set_submenu(self.menu_ocrdesktop)
         self._menubar.append(self.item_ocrdesktop)
-        if self._screenShotMode in [0,1]: # window, desktop
+        if self._screenShotMode in [0,1,4]: # window, desktop, area
             self.item_interact = Gtk.MenuItem(label="_Interact")
             self.item_interact.set_use_underline(True)
             self.item_interact.set_submenu(self.menu_interact)
@@ -1004,7 +1034,7 @@ class OCRScreenReader(Gtk.Window):
                 print('GTK / GDK / GI or pyatspi is not available')
             self._hideGui = True
         try:
-            myopts, args = getopt.getopt(sys.argv[1:],"hl:vndocCOx:gibt:m:f:")
+            myopts, args = getopt.getopt(sys.argv[1:],"hl:avndocCOx:gibt:m:f:")
             ###############################
             # o == option
             # a == argument passed to the o
@@ -1016,6 +1046,8 @@ class OCRScreenReader(Gtk.Window):
                 elif o == '-f':
                     self._screenShotMode = 3
                     self._file = a
+                elif o == '-a':
+                    self._screenShotMode = 4
                 elif o == '-C':
                     if UIAvailable:
                         self._screenShotMode = 2
@@ -1059,6 +1091,7 @@ class OCRScreenReader(Gtk.Window):
         print("-l <lang>        set the OCR language default=eng")
         print("-n               hide GUI (use with -c,-o or -m")
         print("-d               OCR the Destkop")
+        print("-a               Use the mouse to select an area of the screen")
         print("-c               Send to Clipboard")
         print("-f <File>        Read Image from File (PDF, JPG, PNG...)")
         print("-C               Read Image from Clipboard")
